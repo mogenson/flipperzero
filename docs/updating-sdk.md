@@ -25,7 +25,7 @@ Once the SDK is built, run the [`generate-bindings`] script to build a new [`bin
 
 ```bash
 $ cd tools/
-$ cargo run --bin generate-bindings ../../flipperzero-firmware/build/f7-firmware-D/sdk
+$ cargo run --bin generate-bindings ../../flipperzero-firmware/build/f7-firmware-D/sdk_headers
 $ cp bindings.rs ../crates/sys/src
 ```
 

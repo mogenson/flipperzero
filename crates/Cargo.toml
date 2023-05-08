@@ -18,7 +18,7 @@ readme = "../README.md"
 license = "MIT"
 
 [workspace.dependencies]
-flipperzero-sys = { path = "sys", version = "0.8.0" }
+flipperzero-sys = { path = "sys", version = "0.9.0" }
 flipperzero-rt = { path = "rt", version = "0.8.0" }
 flipperzero-alloc = { path = "alloc", version = "0.8.0" }
 flipperzero-test = { path = "test", version = "0.1.0" }
