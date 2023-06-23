@@ -9,125 +9,104 @@ extern crate flipperzero_alloc as alloc;
 extern crate flipperzero_rt;
 
 use alloc::boxed::Box;
-use core::ffi::{c_char, c_void, CStr};
-use core::ptr::NonNull;
+use core::{
+    ffi::{c_char, c_void, CStr},
+    ptr::NonNull,
+};
 use flipperzero::furi::string::FuriString;
-use flipperzero::gui::Gui;
+use flipperzero::gui::{
+    canvas::{Align, Font},
+    view_dispatcher::{
+        ViewDispatcher, ViewDispatcherBuilder, ViewDispatcherCallbacks, ViewDispatcherType,
+    },
+};
 use flipperzero_rt::{entry, manifest};
 use flipperzero_sys as sys;
-use flipperzero_sys::ViewDispatcher;
 
-manifest!(name = "Rust ViewDispatcher example");
+manifest!(name = "ViewDispatcher example");
 entry!(main);
 
-enum AppView {
+enum Views {
     Widget = 0,
     TextInput = 1,
 }
 
-struct App {
-    name: [c_char; 16],
-    view_dispatcher: NonNull<ViewDispatcher>,
+struct ViewDispatcherState();
+
+impl ViewDispatcherCallbacks for ViewDispatcherState {
+    fn on_navigation_event(&mut self, view_dispatcher: &mut ViewDispatcher) -> bool {
+        view_dispatcher.stop();
+        true
+    }
+}
+
+struct TextInputState<'a> {
+    view_dispatcher: &'a mut ViewDispatcher,
     widget: NonNull<sys::Widget>,
-    text_input: NonNull<sys::TextInput>,
-}
-
-impl App {
-    pub fn new() -> Box<Self> {
-        Box::new(App {
-            name: Default::default(),
-            view_dispatcher: unsafe { NonNull::new_unchecked(sys::view_dispatcher_alloc()) },
-            widget: unsafe { NonNull::new_unchecked(sys::widget_alloc()) },
-            text_input: unsafe { NonNull::new_unchecked(sys::text_input_alloc()) },
-        })
-    }
-}
-
-impl Drop for App {
-    fn drop(&mut self) {
-        unsafe {
-            sys::view_dispatcher_free(self.view_dispatcher.as_ptr());
-            sys::widget_free(self.widget.as_ptr());
-            sys::text_input_free(self.text_input.as_ptr());
-        }
-    }
+    name: [c_char; 16],
 }
 
 pub unsafe extern "C" fn text_input_callback(context: *mut c_void) {
-    let app = context as *mut App;
+    let text_input_state = context as *mut TextInputState;
+
     let mut message = FuriString::from("Hello ");
-    message.push_c_str(CStr::from_ptr((*app).name.as_ptr()));
+    message.push_c_str(CStr::from_ptr((*text_input_state).name.as_ptr()));
+
     sys::widget_add_string_element(
-        (*app).widget.as_ptr(),
-        128 / 2,
-        64 / 2,
-        sys::Align_AlignCenter,
-        sys::Align_AlignCenter,
-        sys::Font_FontPrimary,
+        (*text_input_state).widget.as_ptr(),
+        64,
+        32,
+        Align::Center.into(),
+        Align::Center.into(),
+        Font::Primary.into(),
         message.as_c_str().as_ptr(),
     );
-    sys::view_dispatcher_switch_to_view((*app).view_dispatcher.as_ptr(), AppView::Widget as u32);
-}
 
-pub unsafe extern "C" fn navigation_event_callback(context: *mut c_void) -> bool {
-    let view_dispatcher = context as *mut ViewDispatcher;
-    sys::view_dispatcher_stop(view_dispatcher);
-    sys::view_dispatcher_remove_view(view_dispatcher, AppView::Widget as u32);
-    sys::view_dispatcher_remove_view(view_dispatcher, AppView::TextInput as u32);
-    true
+    (*text_input_state)
+        .view_dispatcher
+        .switch_to_view(Views::Widget as u32);
 }
 
 fn main(_args: *mut u8) -> i32 {
-    let mut app = App::new();
+    let mut view_dispatcher =
+        ViewDispatcherBuilder::new(ViewDispatcherType::Fullscreen, ViewDispatcherState());
+
+    let widget = unsafe { NonNull::new_unchecked(sys::widget_alloc()) };
+    view_dispatcher.add_view(Views::Widget as u32, unsafe {
+        sys::widget_get_view(widget.as_ptr())
+    });
+
+    let text_input = unsafe { NonNull::new_unchecked(sys::text_input_alloc()) };
+    view_dispatcher.add_view(Views::TextInput as u32, unsafe {
+        sys::text_input_get_view(text_input.as_ptr())
+    });
+
+    let text_input_state = Box::into_raw(Box::new(TextInputState {
+        view_dispatcher: &mut view_dispatcher,
+        widget: widget,
+        name: Default::default(),
+    }));
 
     unsafe {
-        sys::view_dispatcher_enable_queue(app.view_dispatcher.as_ptr());
-        sys::view_dispatcher_set_event_callback_context(
-            app.view_dispatcher.as_ptr(),
-            app.view_dispatcher.as_ptr() as *mut c_void,
-        );
-        sys::view_dispatcher_set_navigation_event_callback(
-            app.view_dispatcher.as_ptr(),
-            Some(navigation_event_callback),
-        );
-        sys::view_dispatcher_add_view(
-            app.view_dispatcher.as_ptr(),
-            AppView::Widget as u32,
-            sys::widget_get_view(app.widget.as_ptr()),
-        );
-        sys::view_dispatcher_add_view(
-            app.view_dispatcher.as_ptr(),
-            AppView::TextInput as u32,
-            sys::text_input_get_view(app.text_input.as_ptr()),
-        );
-    }
-
-    let gui = Gui::new();
-    unsafe {
-        sys::view_dispatcher_attach_to_gui(
-            app.view_dispatcher.as_ptr(),
-            gui.as_raw(),
-            sys::ViewDispatcherType_ViewDispatcherTypeFullscreen,
-        );
-
-        sys::text_input_reset(app.text_input.as_ptr());
-        sys::text_input_set_header_text(app.text_input.as_ptr(), sys::c_string!("Enter your name"));
-
+        sys::text_input_set_header_text(text_input.as_ptr(), sys::c_string!("Enter your name"));
         sys::text_input_set_result_callback(
-            app.text_input.as_ptr(),
+            text_input.as_ptr(),
             Some(text_input_callback),
-            &*app as *const App as *mut c_void,
-            app.name.as_mut_ptr(),
-            app.name.len(),
+            text_input_state as *mut c_void,
+            (*text_input_state).name.as_mut_ptr(),
+            (*text_input_state).name.len(),
             true,
         );
-
-        sys::view_dispatcher_switch_to_view(
-            app.view_dispatcher.as_ptr(),
-            AppView::TextInput as u32,
-        );
-        sys::view_dispatcher_run(app.view_dispatcher.as_ptr());
     }
+
+    view_dispatcher.switch_to_view(Views::TextInput as u32);
+    view_dispatcher.run();
+
+    view_dispatcher.remove_view(Views::Widget as u32);
+    unsafe { sys::widget_free(widget.as_ptr()) };
+
+    view_dispatcher.remove_view(Views::TextInput as u32);
+    unsafe { sys::text_input_free(text_input.as_ptr()) };
 
     0
 }
